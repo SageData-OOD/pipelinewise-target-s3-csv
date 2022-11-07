@@ -20,6 +20,12 @@ from target_s3_csv import utils
 logger = singer.get_logger('target_s3_csv')
 
 
+def print_metric(record_counter, stream_name):
+    metric = {"type": "counter", "metric": "record_count", "value": record_counter.get(stream_name),
+              "tags": {"count_type": "table_rows_persisted", "table": stream_name}}
+    logger.info('\nINFO METRIC: %s', json.dumps(metric))
+
+
 def emit_state(state):
     if state is not None:
         line = json.dumps(state)
@@ -50,6 +56,8 @@ def persist_messages(messages, config, s3_client):
     filenames = {}
 
     now = datetime.now().strftime('%Y%m%dT%H%M%S')
+
+    record_counter = dict()
 
     for message in messages:
         try:
@@ -118,6 +126,10 @@ def persist_messages(messages, config, s3_client):
                 if file_is_empty:
                     writer.writeheader()
 
+                if stream_name not in record_counter:
+                    record_counter[stream_name] = 0
+                record_counter[stream_name] += 1
+
                 writer.writerow(flattened_record)
 
         elif message_type == 'STATE':
@@ -142,6 +154,9 @@ def persist_messages(messages, config, s3_client):
     # Upload created CSV files to S3
     s3.upload_files(iter(filenames.values()), s3_client, config['s3_bucket'], config.get("compression"),
                     config.get('encryption_type'), config.get('encryption_key'))
+
+    for stream_name in record_counter:
+        print_metric(record_counter, stream_name)
 
     return state
 
