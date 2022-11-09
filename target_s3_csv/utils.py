@@ -118,7 +118,7 @@ def flatten_record(d, parent_key=None, sep='__'):
         if isinstance(v, MutableMapping):
             items.extend(flatten_record(v, parent_key + [k], sep=sep).items())
         else:
-            items.append((new_key, json.dumps(v) if type(v) is list else v))
+            items.append((new_key, json.dumps(v, default=str) if type(v) is list else v))
     return dict(items)
 
 

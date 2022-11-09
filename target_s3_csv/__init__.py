@@ -6,7 +6,7 @@ import gzip
 import io
 import json
 import os
-import shutil
+from collections import OrderedDict
 import sys
 import tempfile
 import singer
@@ -113,9 +113,28 @@ def persist_messages(messages, config, s3_client):
                                         delimiter=delimiter,
                                         quotechar=quotechar)
                     first_line = next(reader)
-                    headers[stream_name] = first_line if first_line else flattened_record.keys()
+                    # DP: unionize the 2 headers. No sorted set in Python according to SO :)
+                    merged_sorted_headers = OrderedDict()
+                    if first_line:
+                        for header in first_line:
+                            merged_sorted_headers[header] = None
+
+                    for header in flattened_record.keys():
+                        merged_sorted_headers[header] = None
+
+                    headers[stream_name] = merged_sorted_headers.keys() #first_line if first_line else flattened_record.keys()
             else:
-                headers[stream_name] = flattened_record.keys()
+                merged_sorted_headers = OrderedDict()
+
+                if stream_name in headers:
+                    for header in headers[stream_name]:
+                        merged_sorted_headers[header] = None
+
+                for header in flattened_record.keys():
+                    merged_sorted_headers[header] = None
+
+                headers[stream_name] = merged_sorted_headers.keys()
+
 
             with open(filename, 'a') as csvfile:
                 writer = csv.DictWriter(csvfile,
@@ -123,8 +142,8 @@ def persist_messages(messages, config, s3_client):
                                         extrasaction='ignore',
                                         delimiter=delimiter,
                                         quotechar=quotechar)
-                if file_is_empty:
-                    writer.writeheader()
+
+                # writer.writeheader()
 
                 if stream_name not in record_counter:
                     record_counter[stream_name] = 0
@@ -150,6 +169,16 @@ def persist_messages(messages, config, s3_client):
             logger.debug('ACTIVATE_VERSION message')
         else:
             logger.warning("Unknown message type {} in message {}".format(o['type'], o))
+
+    # add sorted headers to the csv data
+    for stream_name, metadata in filenames.items():
+        filename = metadata["filename"]
+        with open(filename, "r") as data_no_header:
+            os.unlink(filename)
+            with open(filename, 'w') as data_with_header:
+                data_with_header.write(",".join(headers[stream_name]) + "\n")
+                for line in data_no_header:
+                    data_with_header.write(line)
 
     # Upload created CSV files to S3
     s3.upload_files(iter(filenames.values()), s3_client, config['s3_bucket'], config.get("compression"),
